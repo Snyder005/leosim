@@ -163,9 +163,8 @@ class BaseSatellite:
         dt = (instrument.pixel_scale/self.tangential_omega).to_value(u.s, equivalencies=[(u.pix, None)])
 
         photo_params = instrument.get_photo_params(exptime=dt)
-        bandpass = instrument.get_bandpass(band)
 
-        m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params, wavelen=wavelen, fnu=fnu)
+        m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
         adu = m0_adu*(10**(-magnitude/2.5))
 
         return adu
@@ -226,15 +225,15 @@ class BaseSatellite:
 
         return scale, normalized_profile
 
-    def get_surface_brightness_profile(self, magnitude, band, seeing_profile, instrument, step_size, steps):
+    def get_surface_brightness_profile(self, magnitude, bandpass, seeing_profile, instrument, step_size, steps):
         """Calculate the cross-sectional surface brightness profile.
 
         Parameters
         ----------
         magnitude : `float`
             Stationary AB magnitude.
-        band : `str`
-            Name of filter band.
+        bandpass : `rubin_sim.phot_utils.Bandpass`, optional
+            Telescope throughput curve (None by default).
         seeing_profile : `galsim.GSObject`
             A surface brightness profile representing an atmospheric PSF.
         instrument : `leosim.Instrument`
@@ -251,7 +250,7 @@ class BaseSatellite:
         profile : `numpy.ndarray`
             Flux linear density array for cross-sectional surface brightness profile (adu/pixel).
         """
-        flux = self.get_flux(magnitude, band, instrument)
+        flux = self.get_flux(magnitude, bandpass, instrument)
         defocus_profile = self.get_defocus_profile(instrument)
         final_profile = galsim.Convolve([self.profile, defocus_profile, seeing_profile])
         final_profile = final_profile.withFlux(flux)
