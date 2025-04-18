@@ -78,7 +78,7 @@ class Instrument:
     @property
     def plate_scale(self):
         """Plate scale of camera (`astropy.units.Quantity`, read-only)."""
-        return self._pixel_scale
+        return self._plate_scale
 
     @property
     def effarea(self):

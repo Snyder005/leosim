@@ -117,7 +117,7 @@ class BaseSatellite:
         v = np.sqrt(G*M_earth/(R_earth + self.height))
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
-   @property
+    @property
     def orbital_omega(self):
         """Orbital angular velocity (`astropy.units.Quantity`, read-only)."""
         omega = self.orbital_velocity/(R_earth + self.height)
@@ -195,8 +195,8 @@ class BaseSatellite:
         adu : `float`
             Number of ADU.
         """
-        exptime = self.get_exptime(intrument.plate_scale)
-        photo_params = instrument.get_photo_params(exptime=exptime.to_value(u.s)
+        exptime = self.get_exptime(instrument.plate_scale)
+        photo_params = instrument.get_photo_params(exptime=exptime.to_value(u.s))
 
         m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
         adu = m0_adu*(10**(-magnitude/2.5))
@@ -290,7 +290,7 @@ class BaseSatellite:
         final_profile = final_profile.withFlux(flux)
         image = final_profile.drawImage(scale=step_size, nx=steps, ny=steps)
        
-        profile = np.sum(image.array, axis=0)*instrument.pixel_scale.to_value(u.arcsec/u.pix)/step_size
+        profile = np.sum(image.array, axis=0)*instrument.plate_scale.to_value(u.arcsec/u.pix)/step_size
         scale = np.linspace(-int(steps*step_size/2), int(steps*step_size/2), steps)
 
         return scale, profile
