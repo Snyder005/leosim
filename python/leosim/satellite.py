@@ -40,6 +40,8 @@ class BaseSatellite:
         Orbital height.
     zangle : `astropy.units.Quantity`
         Observed angle from zenith.
+    phi : `astropy.units.Quantity`, optional
+        Rotational angle (90 degrees, by default).
 
     Raises
     ------
@@ -47,9 +49,10 @@ class BaseSatellite:
         Raised if parameter ``zangle`` is less than 0 deg.
     """
 
-    def __init__(self, height, zangle, sed=None): 
+    def __init__(self, height, zangle, phi=90*u.deg): 
         self.height = height
         self.zangle = zangle
+        self.phi = phi
         self._sed = photUtils.Sed()
         self._sed.set_flat_sed()
 
@@ -74,13 +77,27 @@ class BaseSatellite:
         self._zangle = value.to(u.deg)
 
     @property
+    def phi(self):
+        """Rotational angle (`astropy.units.Quantity`)."""
+        return self._phi
+
+    @phi.setter
+    def phi(self, value):
+        self._phi = value.to(u.deg)
+
+    @property
+    def theta(self):
+        """Nadir angle (`astropy.units.Quantity`)."""
+        theta = np.arcsin(R_earth*np.sin(self.zangle)/(R_earth + self.height))
+        return theta.to(u.deg)
+
+    @property
     def distance(self):
         """Distance to satellite (`astropy.units.Quantity`, read-only)."""
-        x = np.arcsin(R_earth*np.sin(self.zangle)/(R_earth + self.height))
-        if np.isclose(x.value, 0):
+        if np.isclose(self.theta.value, 0):
             distance = self.height
         else:
-            distance = np.sin(self.zangle - x)*R_earth/np.sin(x)
+            distance = np.sin(self.zangle - self.theta)*R_earth/np.sin(self.theta)
         return distance.to(u.km)
 
     @property
@@ -95,24 +112,24 @@ class BaseSatellite:
         return None
 
     @property
-    def orbital_omega(self):
-        """Orbital angular velocity (`astropy.units.Quantity`, read-only)."""
-        omega = np.sqrt(G*M_earth/(R_earth + self.height)**3)
-        return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
-
-    @property
     def orbital_velocity(self):
         """Orbital velocity (`astropy.units.Quantity`, read-only)."""
-        v = self.orbital_omega*(R_earth + self.height)
+        v = np.sqrt(G*M_earth/(R_earth + self.height))
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
+
+   @property
+    def orbital_omega(self):
+        """Orbital angular velocity (`astropy.units.Quantity`, read-only)."""
+        omega = self.orbital_velocity/(R_earth + self.height)
+        return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
     @property
     def tangential_velocity(self):
         """Velocity tangential to the line-of-sight (`astropy.units.Quantity`, 
         read-only).
         """
-        x = np.arcsin(R_earth*np.sin(self.zangle)/(R_earth + self.height))
-        return self.orbital_velocity*np.cos(x)
+        v = self.orbital_velocity*np.cos(self.theta)
+        return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
     @property
     def tangential_omega(self):
@@ -142,6 +159,24 @@ class BaseSatellite:
         defocus_profile = galsim.TopHat(r_o) - galsim.TopHat(r_i, flux=(r_i/r_o)**2.)
 
         return defocus_profile
+
+    def get_exptime(self, plate_scale):
+        """Calculate effective pixel exposure time for a given plate scale.
+
+        Parameters
+        ----------
+        plate_scale : `astropy.units.Quantity`
+            Instrument plate scale.
+        
+        Returns
+        -------
+        exptime : `astropy.units.Quantity`
+            Effective pixel exposure time.
+        """
+        plate_scale = plate_scale.to(u.arcsec/u.pix)
+        exptime = (plate_scale/self.tangential_omega)
+
+        return exptime.to(u.s, equivalencies=[(u.pix, None)])
     
     def get_flux(self, magnitude, bandpass, instrument):
         """Calculate the number of ADU for a given observation.
@@ -160,9 +195,8 @@ class BaseSatellite:
         adu : `float`
             Number of ADU.
         """
-        dt = (instrument.pixel_scale/self.tangential_omega).to_value(u.s, equivalencies=[(u.pix, None)])
-
-        photo_params = instrument.get_photo_params(exptime=dt)
+        exptime = self.get_exptime(intrument.plate_scale)
+        photo_params = instrument.get_photo_params(exptime=exptime.to_value(u.s)
 
         m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
         adu = m0_adu*(10**(-magnitude/2.5))
