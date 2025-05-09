@@ -52,13 +52,13 @@ class Instrument:
     gain = None
     """Gain of the instrument camera (`float`)."""
 
-    def __init__(self, outer_radius, inner_radius, pixel_scale, gain=1.0):
+    def __init__(self, outer_radius, inner_radius, plate_scale, gain=1.0):
 
         if outer_radius <= inner_radius:
             raise ValueError("Outer radius must be greater than inner radius.") 
         self._outer_radius = outer_radius.to(u.m)
         self._inner_radius = inner_radius.to(u.m)
-        self._pixel_scale = pixel_scale.to(u.arcsec/u.pix)
+        self._plate_scale = plate_scale.to(u.arcsec/u.pix)
         self.gain = gain
 
     @property
@@ -76,9 +76,9 @@ class Instrument:
         return self._inner_radius
 
     @property
-    def pixel_scale(self):
-        """Pixel scale of camera (`astropy.units.Quantity`, read-only)."""
-        return self._pixel_scale
+    def plate_scale(self):
+        """Plate scale of camera (`astropy.units.Quantity`, read-only)."""
+        return self._plate_scale
 
     @property
     def effarea(self):
@@ -98,27 +98,8 @@ class Instrument:
         photo_params : `rubin_sim.phot_utils.PhotometricParameters`
             Photometric parameters for the exposure.
         """
-        pixel_scale = self.pixel_scale.to_value(u.arcsec/u.pix)
+        plate_scale = self.plate_scale.to_value(u.arcsec/u.pix)
         effarea = self.effarea.to_value(u.cm*u.cm)
         photo_params = photUtils.PhotometricParameters(exptime=exptime, nexp=1, effarea=effarea,
-                                                       gain=self.gain, platescale=pixel_scale)
+                                                       gain=self.gain, platescale=plate_scale)
         return photo_params
-
-    @staticmethod
-    def get_bandpass(band):
-        """Get the telescope bandpass throughput curve.
-
-        Parameters
-        ----------
-        band : `str`
-            Name of filter band.
-
-        Returns
-        -------
-        bandpass : `rubin_sim.phot_utils.Bandpass`
-            Telescope throughput curves.
-        """
-        filename = os.path.join(get_data_dir(), 'throughputs/baseline/total_{0}.dat'.format(band.lower()))
-        bandpass = photUtils.Bandpass()
-        bandpass.read_throughput(filename)
-        return bandpass
