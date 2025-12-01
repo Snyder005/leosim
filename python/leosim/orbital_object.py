@@ -29,9 +29,7 @@ import galsim
 
 import rubin_sim.phot_utils as photUtils
 
-from .component import * # is this needed?
-
-def get_streak_cross_section(final, nx, ny, scale, gain=1.): # Maybe add gain in here
+def get_streak_cross_section(final, nx, ny, scale, gain=1.):
     """Calculate the cross section of a streak created by the orbital 
     object in an image.
 
@@ -225,15 +223,15 @@ class BaseOrbitalObject:
 
         return pixel_exptime.to(u.s, equivalencies=[(u.pix, None)])
 
-    def calculate_adu(self, observatory, bandpass, magnitude, exptime): # Is bandpass an observatory property? (Naively, yes)
+    def calculate_adu(self, observatory, band, magnitude, exptime):
         """Calculate the number of ADU from the camera.
 
         Parameters
         __________
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
-        bandpass : `rubin_sim.phot_utils.Bandpass`
-            Telescope throughput curve.
+        band : `str`
+            Name of bandpass.
         magnitude : `float`
             Stationary AB magnitude.
         exptime : `astropy.units.Quantity`
@@ -245,12 +243,13 @@ class BaseOrbitalObject:
             Number of ADU.
         """
         photo_params = observatory.get_photo_params(exptime.to(u.s))
+        bandpass = observatory.get_bandpass(band)
         m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
         adu = m0_adu*(10**(-magnitude/2.5))
 
         return adu
 
-    def get_final_profile(self, psf, observatory, bandpass, magnitude, exptime):
+    def get_final_profile(self, psf, observatory, band=None, magnitude=None, exptime=None):
         """Create the convolution of the atmospheric PSF, defocus kernel, and 
         satellite profiles.
         
@@ -260,12 +259,12 @@ class BaseOrbitalObject:
             A surface brightness profile representing an atmospheric PSF.
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
-        bandpass : `rubin_sim.phot_utils.Bandpass`
-            Telescope throughput curve.
-        magnitude : `float`
-            Stationary AB magnitude.
-        exptime : `astropy.units.Quantity`
-            Exposure time.
+        band : `str`, optional
+            Name of telescope bandpass (None, by default)
+        magnitude : `float`, optional
+            Stationary AB magnitude (None, by default)
+        exptime : `astropy.units.Quantity`, optional
+            Exposure time (None, by default)
 
         Returns
         -------
@@ -275,14 +274,11 @@ class BaseOrbitalObject:
         defocus = self.get_defocus_profile(observatory)
         final = galsim.Convolve([self.profile, defocus, psf])
 
-        adu = self.calculate_adu(bandpass, observatory, magnitude, exptime)        
-        # Add option to apply gain
-        # Add option for normalization
-        final = final.withFlux(adu)
+        if (band is not None) and (magnitude is not None) and (exptime is not None):
+            adu = self.calculate_adu(observatory, band, magnitude, exptime)
+            final = final.withFlux(adu)
 
         return final
-
-# Below child classes have been largely updated except for CompositeOrbitalObject (11/30/2025, 17:30). 
 
 class DiskOrbitalObject(BaseOrbitalObject):
     """A circular disk orbital object.

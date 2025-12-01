@@ -112,3 +112,23 @@ class Observatory:
                                                        platescale=self.pixel_scale.to_value(u.arcsec/u.pix))
 
         return photo_params
+
+    @staticmethod
+    def get_bandpass(self, band):
+        """Get bandpass corresponding to the filter band.
+        
+        Parameters
+        ----------
+        band : `str`
+            Name of the filter band.
+
+        Returns
+        -------
+        bandpass : `rubin_sim.phot_utils.Bandpass`
+            Telescope throughput curve.
+        """
+        filename = os.path.join(get_data_dir(),'throughputs/baseline/total_{0}.dat'.format(band))
+        bandpass = photUtils.Bandpass()
+        bandpass.read_throughput(filename)
+
+        return bandpass
