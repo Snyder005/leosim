@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("DiskSatellite", "RectangularSatellite", "ComponentSatellite")
+__all__ = ("DiskOrbitalObject", "RectangularOrbitalObject", "ComponentOrbital")
 
 import numpy as np
 import os
@@ -31,34 +31,36 @@ import rubin_sim.phot_utils as photUtils
 
 from .component import * # is this needed?
 
-class BaseSatellite:
-    """A class representing a base satellite object.
+class BaseOrbitalObject:
+    """A base class that defines attributes and methods common to all orbital
+    objects.
 
     Parameters
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
-    zangle : `astropy.units.Quantity`
-        Observed angle from zenith.
+    zenith_angle : `astropy.units.Quantity`
+        Observed angle from telescope zenith.
     phi : `astropy.units.Quantity`, optional
         Rotational angle (90 degrees, by default).
 
     Raises
     ------
     ValueError
-        Raised if parameter ``zangle`` is less than 0 deg.
+        Raised if parameter ``zenith_angle`` is less than 0 deg.
     """
 
-    def __init__(self, height, zangle, phi=90*u.deg): 
+    def __init__(self, height, zenith_angle, phi=90*u.deg):
         self.height = height
-        self.zangle = zangle
-        self.phi = phi
+        self.zenith_angle = zenith_angle
+        self.phi = phi # May change in future updates
         self._sed = photUtils.Sed()
         self._sed.set_flat_sed()
 
     @property
     def height(self):
-        """Orbital height (`astropy.units.Quantity`)."""
+        """Orbital height (`astropy.units.Quantity`).
+        """
         return self._height
 
     @height.setter
@@ -66,15 +68,17 @@ class BaseSatellite:
         self._height = value.to(u.km)
 
     @property
-    def zangle(self):
-        """Observed angle from zenith (`astropy.units.Quantity`)."""
-        return self._zangle
+    def zenith_angle(self):
+        """Angle from telescope zenith to orbital object 
+        (`astropy.units.Quantity`).
+        """
+        return self._zenith_angle
 
-    @zangle.setter
-    def zangle(self, value):
+    @zenith_angle.setter
+    def zenith_angle(self, value):
         if value.to(u.deg) < 0.:
-            raise ValueError('zangle cannot be less than 0 deg')
-        self._zangle = value.to(u.deg)
+            raise ValueError('zenith_angle cannot be less than 0 deg')
+        self._zenith_angle = value.to(u.deg)
 
     @property
     def phi(self):
@@ -86,61 +90,72 @@ class BaseSatellite:
         self._phi = value.to(u.deg)
 
     @property
-    def theta(self):
-        """Nadir angle (`astropy.units.Quantity`)."""
-        theta = np.arcsin(R_earth*np.sin(self.zangle)/(R_earth + self.height))
-        return theta.to(u.deg)
+    def nadir_angle(self):
+        """Angle from orbital object nadir to telescope 
+        (`astropy.units.Quantity`, read-only).
+        """
+        nadir_angle = np.arcsin(R_earth*np.sin(self.zenith_angle)/(R_earth + self.height))
+        return nadir_angle.to(u.deg)
 
     @property
     def distance(self):
-        """Distance to satellite (`astropy.units.Quantity`, read-only)."""
+        """Distance to orbital object from telescope (`astropy.units.Quantity`, 
+        read-only).
+        """
         if np.isclose(self.theta.value, 0):
             distance = self.height
         else:
-            distance = np.sin(self.zangle - self.theta)*R_earth/np.sin(self.theta)
+            distance = np.sin(self.zenith_angle - self.nadir_angle)*R_earth/np.sin(self.zenith_angle)
         return distance.to(u.km)
 
     @property
     def sed(self):
-        """Spectral energy distribution (`rubin_sim.phot_utils.Sed`)."""
+        """Spectral energy distribution (`rubin_sim.phot_utils.Sed`, 
+        read-only).
+        """
         return self._sed
 
     @property
     def profile(self):
-        """Surface brightness profile (`galsim.GSObject`, read-only)
+        """Orbital object geometric surface brightness profile 
+        (`galsim.GSObject`, read-only).
         """
         return None
 
+    # Should these be described as amplitudes or speeds?
+
     @property
     def orbital_velocity(self):
-        """Orbital velocity (`astropy.units.Quantity`, read-only)."""
+        """Orbital velocity (`astropy.units.Quantity`, read-only).
+        """
         v = np.sqrt(G*M_earth/(R_earth + self.height))
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
     @property
     def orbital_omega(self):
-        """Orbital angular velocity (`astropy.units.Quantity`, read-only)."""
+        """Orbital angular velocity (`astropy.units.Quantity`, read-only).
+        """
         omega = self.orbital_velocity/(R_earth + self.height)
         return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
     @property
-    def tangential_velocity(self):
-        """Velocity tangential to the line-of-sight (`astropy.units.Quantity`, 
-        read-only).
+    def perpendicular_velocity(self): # Expand to include all directions of orbital object motion
+        """Velocity perpendicular to the line-of-sight vector 
+        (`astropy.units.Quantity`, read-only).
         """
         v = self.orbital_velocity*np.cos(self.theta)
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
     @property
-    def tangential_omega(self):
-        """Angular velocity tangential to the line-of-sight 
+    def perpendicular_omega(self): # Need new name
+        """Angular velocity perpendicular to the line-of-sight vector 
         (`astropy.units.Quantity`, read-only).
         """
-        omega = self.tangential_velocity/(self.distance)
+        omega = self.perpendicular_velocity/self.distance
         return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
-    def get_defocus_profile(self, instrument):
-        """Calculate a defocusing profile for a given instrument.
+    def get_defocus(self, instrument): # Maybe simplify to single top hat for instances where r_i is close to zero.
+        """Calculate the defocus kernel profile for a given instrument.
 
         Parameters
         ----------
@@ -149,35 +164,43 @@ class BaseSatellite:
         
         Returns
         -------
-        defocus_profile : `galsim.GSObject`
+        defocus : `galsim.GSObject`
             Defocus kernel profile.
         """
         r_o = (instrument.outer_radius/self.distance).to_value(u.arcsec, 
                                                                equivalencies=u.dimensionless_angles())
         r_i = (instrument.inner_radius/self.distance).to_value(u.arcsec, 
                                                                equivalencies=u.dimensionless_angles())
-        defocus_profile = galsim.TopHat(r_o) - galsim.TopHat(r_i, flux=(r_i/r_o)**2.)
+        defocus = galsim.TopHat(r_o) - galsim.TopHat(r_i, flux=(r_i/r_o)**2.)
 
-        return defocus_profile
+        return defocus
 
-    def get_exptime(self, plate_scale):
-        """Calculate effective pixel exposure time for a given plate scale.
+# Construction starts here (11/30/2024, 17:45).
+
+    def get_pixel_exptime(self, pixel_scale): # ensure pixel vs plate scale
+        """Calculate the pixel traversal exposure time.
+
+        The pixel traversal exposure time is the time for the orbital object to
+        traverse a single pixel that is dependent on the angular velocity
+        perpendicular to the line-of-sight vector.
 
         Parameters
         ----------
-        plate_scale : `astropy.units.Quantity`
-            Instrument plate scale.
-        
+        pixel_scale : `astropy.units.Quantity`
+            Instrument pixel scale.
+
         Returns
         -------
-        exptime : `astropy.units.Quantity`
-            Effective pixel exposure time.
+        pixel_exptime : `astropy.units.Quantity`
+            Pixel traversal exposure time.
         """
-        plate_scale = plate_scale.to(u.arcsec/u.pix)
-        exptime = (plate_scale/self.tangential_omega)
+        pixel_scale = pixel_scale.to(u.arcsec/u.pix)
+        pixel_exptime = pixel_scale/self.perpendicular_omega
 
-        return exptime.to(u.s, equivalencies=[(u.pix, None)])
-    
+        return pixel_exptime.to(u.s, equivalencies=[(u.pix, None)])
+
+# Below is flagged for replacement and removal (11/30/2024, 17:45).
+   
     def get_flux(self, magnitude, bandpass, instrument):
         """Calculate the number of ADU for a given observation.
 
@@ -294,18 +317,20 @@ class BaseSatellite:
         scale = np.linspace(-int(steps*step_size/2), int(steps*step_size/2), steps)
 
         return scale, profile
-   
-class DiskSatellite(BaseSatellite):
-    """A class representing a circular disk satellite.
+
+# Below child classes have been largely updated except for CompositeOrbitalObject (11/30/2025, 17:30). 
+
+class DiskOrbitalObject(BaseOrbitalObject):
+    """A circular disk orbital object.
 
     Parameters
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
     zangle : `astropy.units.Quantity`
-        Observed angle from zenith.
+        Observed angle from telescope zenith.
     radius : `astropy.units.Quantity`
-        Radius of the satellite.
+        Radius of the orbital object.
     """
 
     def __init__(self, height, zangle, radius): 
@@ -314,32 +339,31 @@ class DiskSatellite(BaseSatellite):
 
     @property
     def radius(self):
-        """Radius of the satellite (`astropy.units.Quantity`)."""
+        """Radius of the orbital object (`astropy.units.Quantity`, read-only).
+        """
         return self._radius
-
-    @radius.setter
-    def radius(self, value):
-        self._radius = value.to(u.m)
 
     @property
     def profile(self):
-        """Surface brightness profile (`galsim.TopHat`, read-only)."""
+        """Orbital object geometric surface brightness profile 
+        (`galsim.TopHat`, read-only).
+        """
         r = (self.radius/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
         return galsim.TopHat(r)
 
-class RectangularSatellite(BaseSatellite):
-    """A class representing a rectangular satellite.
+class RectangularOrbitalObject(BaseOrbitalObject):
+    """A rectangular orbital object.
 
     Parameters
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
     zangle : `astropy.units.Quantity`
-        Observed angle from zenith.
+        Observed angle from telescope zenith.
     width : `astropy.units.Quantity`
-        Width of the satellite.
+        Width of the orbital object.
     length : `astropy.units.Quantity`
-        Length of the satellite.
+        Length of the orbital object.
     """
 
     def __init__(self, height, zangle, width, length):
@@ -349,40 +373,36 @@ class RectangularSatellite(BaseSatellite):
 
     @property
     def width(self):
-        """Width of the satellite (`astropy.units.Quantity`)."""
+        """Width of the orbital object (`astropy.units.Quantity`, read-only).
+        """
         return self._width
-
-    @width.setter
-    def width(self, value):
-        self._width = value.to(u.m)
 
     @property
     def length(self):
-        """Length of the satellite (`astropy.units.Quantity`)."""
+        """Length of the orbital object (`astropy.units.Quantity`, read-only).
+        """
         return self._length
-
-    @length.setter
-    def length(self, value):
-        self._length = value.to(u.m)
 
     @property
     def profile(self):
-        """Surface brightness profile (`galsim.Box`, read-only)."""
+        """Orbital object geometric surface brightness profile (`galsim.Box`, 
+        read-only).
+        """
         w = (self.width/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
         l = (self.length/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
         return galsim.Box(w, l)
 
-class ComponentSatellite(BaseSatellite):
-    """A class representing a satellite assembled from components.
+class CompositeOrbitalObject(BaseOrbitalObject): # This needs work to perform proper component list checks.
+    """A composite orbital object made up of smaller components.
 
     Parameters
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
     zangle : `astropy.units.Quantity`
-        Observed angle from zenith.
+        Observed angle from telescope zenith.
     components : `list` [`leosim.Component`]
-        A list of satellite components.
+        A list of components.
 
     Raises
     ------
@@ -393,24 +413,22 @@ class ComponentSatellite(BaseSatellite):
     def __init__(self, height, zangle, components):
         super().__init__(height, zangle)
 
-        if len(components) == 0:
+        if len(components) == 0: # Need a way to check this is a non-empty list or tuple (or similar).
             raise ValueError("components list must include at least one component.")
         self._components = components
 
     @property
     def components(self):
-        """A list of satellite components. (`list` [`leosim.Component`], 
+        """A list of components. (`list` [`leosim.Component`], 
         read-only).
         """
-        return self._components
-        
+        return self._components        
+
     @property
     def profile(self):
-        """Surface brightness profile (`galsim.GSObject`, read-only)."""
-        profile = self.components[0].create_profile(self.distance)
-        
-        for component in self.components[1:]:
-            profile += component.create_profile(self.distance)
-            
-        return profile
-
+        """Orbital object geometric surface brightness profile 
+        (`galsim.GSObject`, read-only).
+        """
+        # Check create_profile method for proper astropy unit conversion.
+        component_profiles = [component.create_profile(self.distance) for component in self.components]
+        return galsim.Sum(*component_profiles)
