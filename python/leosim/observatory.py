@@ -41,7 +41,7 @@ class Observatory:
     pixel_scale : `(astropy.units.Quantity)`
         Pixel scale of the instrument camera.
     gain : `float`, optional
-        Gain of the observatory camera in electrons per ADU. Default is 1.
+        Gain of the observatory camera in electrons per ADU (1.0, by default).
 
     Raises
     ------

@@ -31,6 +31,36 @@ import rubin_sim.phot_utils as photUtils
 
 from .component import * # is this needed?
 
+def get_streak_cross_section(final, nx, ny, scale, gain=1.): # Maybe add gain in here
+    """Calculate the cross section of a streak created by the orbital 
+    object in an image.
+
+    Parameters
+    ----------
+    final : `galsim.GSObject`
+        Final convolution of an orbital object.
+    nx : `int`
+        The x-direction size of the image.
+    ny : `int`
+        The y-direction size of the image.
+    scale: `float`
+        Pixel scale for the image.
+    gain: `float`, optional
+        Gain of the observatory camera in electrons per ADU (1.0, by default).
+
+    Returns
+    -------
+    angular_distance : `numpy.ndarray`
+        Array of angular distance from the streak center.
+    cross_section_signal : `numpy.ndarray`
+        Array of the streak cross section signal values.
+    """
+    image = final.drawImage(nx=steps, ny=steps, scale=scale)
+    cross_section_signal = np.sum(image.array, axis=0)*gain
+    angular_distance = np.linspace(-int(nx*scale/2), int(nx*scale/2), nx)
+
+    return angular_distance, cross_section_signal
+
 class BaseOrbitalObject:
     """A base class that defines attributes and methods common to all orbital
     objects.
@@ -122,8 +152,6 @@ class BaseOrbitalObject:
         """
         return None
 
-    # Should these be described as amplitudes or speeds?
-
     @property
     def orbital_velocity(self):
         """Orbital velocity (`astropy.units.Quantity`, read-only).
@@ -157,7 +185,7 @@ class BaseOrbitalObject:
     def get_defocus_profile(self, instrument):
         """Create the defocus kernel profile for a given instrument.
 
-        Parameters
+        Parameterss
         ----------
         instrument : `leosim.Instrument`
             Instrument used for observation.
@@ -197,147 +225,62 @@ class BaseOrbitalObject:
 
         return pixel_exptime.to(u.s, equivalencies=[(u.pix, None)])
 
-# Construction starts here (11/30/2025, 18:30).
-
-    def calculate_adu(self, magnitude, exptime, bandpass, instrument):
+    def calculate_adu(self, observatory, bandpass, magnitude, exptime): # Is bandpass an observatory property? (Naively, yes)
         """Calculate the number of ADU from the camera.
 
         Parameters
         __________
+        observatory : `leosim.Observatory`
+            Observatory viewing the orbital object.
+        bandpass : `rubin_sim.phot_utils.Bandpass`
+            Telescope throughput curve.
         magnitude : `float`
             Stationary AB magnitude.
         exptime : `astropy.units.Quantity`
             Exposure time.
-        bandpass : `rubin_sim.phot_utils.Bandpass`
-            Telescope throughput curve.
-        observatory : `leosim.Observatory`
-            Observatory imaging the orbital object.
 
         Returns
         -------
         adu : `float`
             Number of ADU.
         """
-        return None
-
-# Below is flagged for replacement and removal (11/30/2024, 17:45).
-   
-    def get_adu(self, magnitude, bandpass, instrument):
-        """Calculate the total number of ADU for a given observation.
-
-        Parameters
-        ----------
-        magnitude : `float`
-            Stationary AB magnitude.
-        bandpass : `rubin_sim.phot_utils.Bandpass`
-            Telescope throughput curve.
-        observatory : `leosim.Observatory`
-            Observatory imaging the orbital object.
-
-        Returns
-        -------
-        adu : `float`
-            Number of ADU.
-        """
-        exptime = self.get_exptime(instrument.plate_scale)
-        photo_params = instrument.get_photo_params(exptime=exptime.to_value(u.s))
-
+        photo_params = observatory.get_photo_params(exptime.to(u.s))
         m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
         adu = m0_adu*(10**(-magnitude/2.5))
 
         return adu
 
-    def get_stationary_profile(self, seeing_profile, instrument, magnitude=None, bandpass=None, **flux_kwargs):
-        """Create the satellite stationary surface brightness profile.
-
-        The satellite stationary surface brightness profile is created by 
-        convolving the satellite surface brightness profile with the defocus
-        kernel profile (determined by the instrument geometry), and an atmospheric
-        PSF. By providing a magnitude and a bandpass, the resulting profile
-        will be scaled by the appropriate flux value.
-
+    def get_final_profile(self, psf, observatory, bandpass, magnitude, exptime):
+        """Create the convolution of the atmospheric PSF, defocus kernel, and 
+        satellite profiles.
+        
         Parameters
         ----------
-        seeing_profile : `galsim.GSObject`
-            A surface brightness profile reprsenting an atmospheric PSF.
-        instrument : `leosim.Instrument`
-            Instrument used for observation.
-        magnitude : `float`, optional
-            Stationary AB magnitude (None by default).
-        bandpass : `rubin_sim.phot_utils.Bandpass`, optional
-            Telescope throughput curve (None by default).
-        **flux_kwargs
-            Additional keyword arguments passed to `get_flux`.
-
-            ``wavelen``:
-                Wavelength array for spectral energy distribution (nm).
-            ``fnu``:
-                Flux density array for spectral energy distribution (Jy).
-
-        Returns
-        -------
-        stationary_profile : `galsim.GSObject`
-            The satellite stationary surface brightness profile.
-        """
-    
-        defocus_profile = self.get_defocus_profile(instrument)
-        stationary_profile = galsim.Convolve([self.profile, defocus_profile, seeing_profile])
-
-        if (magnitude is not None) and (bandpass is not None):
-            adu = self.get_flux(magnitude, bandpass, instrument, **flux_kwargs)
-        else:
-            adu = 1.0
-        stationary_profile = stationary_profile.withFlux(adu)
-
-        return stationary_profile
-
-    def get_normalized_profile(self, seeing_profile, instrument, step_size, steps):
-
-        defocus_profile = self.get_defocus_profile(instrument)
-        final_profile = galsim.Convolve([self.profile, defocus_profile, seeing_profile])
-        image = final_profile.drawImage(scale=step_size, nx=steps, ny=steps)
-
-        profile = np.sum(image.array, axis=0)
-        normalized_profile = profile/np.max(profile)
-        scale = np.linspace(-int(steps*step_size/2), int(steps*step_size/2), steps)
-
-        return scale, normalized_profile
-
-    def get_surface_brightness_profile(self, magnitude, bandpass, seeing_profile, instrument, step_size, steps):
-        """Calculate the cross-sectional surface brightness profile.
-
-        Parameters
-        ----------
+        psf : `galsim.GSObject`
+            A surface brightness profile representing an atmospheric PSF.
+        observatory : `leosim.Observatory`
+            Observatory viewing the orbital object.
+        bandpass : `rubin_sim.phot_utils.Bandpass`
+            Telescope throughput curve.
         magnitude : `float`
             Stationary AB magnitude.
-        bandpass : `rubin_sim.phot_utils.Bandpass`, optional
-            Telescope throughput curve (None by default).
-        seeing_profile : `galsim.GSObject`
-            A surface brightness profile representing an atmospheric PSF.
-        instrument : `leosim.Instrument`
-            Instrument used for observation.
-        step_size : `float`
-            Pixel scale for the image in arcseconds.
-        steps : `int`
-            Size of image in x and y direction.
+        exptime : `astropy.units.Quantity`
+            Exposure time.
 
         Returns
         -------
-        scale : `numpy.ndarray`
-            Angle array for cross-sectional surface brightness profile (arcsec).
-        profile : `numpy.ndarray`
-            Flux linear density array for cross-sectional surface brightness profile (adu/pixel).
+        final : `galsim.GSObject`
+            Final convolution of the component profiles.
         """
-        flux = self.get_flux(magnitude, bandpass, instrument)
-        defocus_profile = self.get_defocus_profile(instrument)
-        final_profile = galsim.Convolve([self.profile, defocus_profile, seeing_profile])
-        final_profile = final_profile.withFlux(flux)
-        image = final_profile.drawImage(scale=step_size, nx=steps, ny=steps)
-       
-        profile = np.sum(image.array, axis=0)*instrument.plate_scale.to_value(u.arcsec/u.pix)/step_size
-        scale = np.linspace(-int(steps*step_size/2), int(steps*step_size/2), steps)
+        defocus = self.get_defocus_profile(observatory)
+        final = galsim.Convolve([self.profile, defocus, psf])
 
-        return scale, profile
+        adu = self.calculate_adu(bandpass, observatory, magnitude, exptime)        
+        # Add option to apply gain
+        # Add option for normalization
+        final = final.withFlux(adu)
+
+        return final
 
 # Below child classes have been largely updated except for CompositeOrbitalObject (11/30/2025, 17:30). 
 
