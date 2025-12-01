@@ -28,8 +28,9 @@ import numpy as np
 import rubin_sim.phot_utils as photUtils
 from rubin_sim.data import get_data_dir
 
-class Instrument:
-    """A class representing a telescope and camera.
+class Observatory:
+    """A class representing an observatory consisting of the telescope geometry 
+    and camera properties.
 
     Parameters
     ----------
@@ -40,7 +41,7 @@ class Instrument:
     pixel_scale : `(astropy.units.Quantity)`
         Pixel scale of the instrument camera.
     gain : `float`, optional
-        Gain of the instrument camera (electrons per ADU). Default is 1.
+        Gain of the observatory camera in electrons per ADU. Default is 1.
 
     Raises
     ------
@@ -49,57 +50,65 @@ class Instrument:
         ``inner_radius``.
     """
 
-    gain = None
-    """Gain of the instrument camera (`float`)."""
+    def __init__(self, outer_radius, inner_radius, pixel_scale, gain=1.0):
 
-    def __init__(self, outer_radius, inner_radius, plate_scale, gain=1.0):
-
-        if outer_radius <= inner_radius:
-            raise ValueError("Outer radius must be greater than inner radius.") 
+        if outer_radius.to(u.m) <= inner_radius.to(u.m):
+            raise ValueError("Outer radius must be greater than inner radius.")
         self._outer_radius = outer_radius.to(u.m)
-        self._inner_radius = inner_radius.to(u.m)
-        self._plate_scale = plate_scale.to(u.arcsec/u.pix)
-        self.gain = gain
+        self._inner_radius = inner_radius.to(u.m)        
+        self._pixel_scale = pixel_scale.to(u.arcsec/u.pix)
+        self._gain = gain
 
     @property
     def outer_radius(self):
-        """Outer radius of the primary mirror (`astropy.units.Quantity`, 
-        read-only).
+        """Outer radius of the telescope primary mirror 
+        (`astropy.units.Quantity`, read-only).
         """
         return self._outer_radius
 
     @property
     def inner_radius(self):
-        """Inner radius of the primary mirror (`astropy.units.Quantity`, 
-        read-only).
+        """Inner radius of the telescope primary mirror 
+        (`astropy.units.Quantity`, read-only).
         """
         return self._inner_radius
 
     @property
-    def plate_scale(self):
-        """Plate scale of camera (`astropy.units.Quantity`, read-only)."""
-        return self._plate_scale
+    def pixel_scale(self):
+        """Pixel scale of the observatory camera (`astropy.units.Quantity`, 
+        read-only).
+        """
+        return self._pixel_scale
 
     @property
-    def effarea(self):
-        """Effective collecting area (`astropy.units.Quantity`, read-only)."""
-        return np.pi*(self.outer_radius**2 - self.inner_radius**2)
+    def gain(self):
+        """Gain of the observatory camera (`float`, read-only).
+        """
+        return self._gain
+
+    @property
+    def effective_area(self):
+        """Effective collecting area of the telescope 
+        (`astropy.units.Quantity`, read-only).
+        """
+        effective_area = np.pi*(self.outer_radius**2 - self.inner_radius**2)
+        return effective_area.to(u.m*u.m)
 
     def get_photo_params(self, exptime):
-        """Generate photometric parameters for a given exposure.
+        """Create photometric parameters for an exposure.
 
         Parameters
         ----------
-        exptime : `float`
-            Exposure time (seconds).
+        exptime : `astropy.units.Quantity`
+            Exposure time.
 
         Returns
         -------
         photo_params : `rubin_sim.phot_utils.PhotometricParameters`
             Photometric parameters for the exposure.
         """
-        plate_scale = self.plate_scale.to_value(u.arcsec/u.pix)
-        effarea = self.effarea.to_value(u.cm*u.cm)
-        photo_params = photUtils.PhotometricParameters(exptime=exptime, nexp=1, effarea=effarea,
-                                                       gain=self.gain, platescale=plate_scale)
+        photo_params = photUtils.PhotometricParameters(exptime=exptime.to_value(u.s), nexp=1, gain=self.gain,
+                                                       effarea=self.effective_area.to_value(u.cm*u.cm),
+                                                       platescale=self.pixel_scale.to_value(u.arcsec/u.pix))
+
         return photo_params

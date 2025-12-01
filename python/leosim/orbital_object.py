@@ -147,15 +147,15 @@ class BaseOrbitalObject:
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
     @property
-    def perpendicular_omega(self): # Need new name
+    def perpendicular_omega(self):
         """Angular velocity perpendicular to the line-of-sight vector 
         (`astropy.units.Quantity`, read-only).
         """
         omega = self.perpendicular_velocity/self.distance
         return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
-    def get_defocus(self, instrument): # Maybe simplify to single top hat for instances where r_i is close to zero.
-        """Calculate the defocus kernel profile for a given instrument.
+    def get_defocus_profile(self, instrument):
+        """Create the defocus kernel profile for a given instrument.
 
         Parameters
         ----------
@@ -175,9 +175,7 @@ class BaseOrbitalObject:
 
         return defocus
 
-# Construction starts here (11/30/2024, 17:45).
-
-    def get_pixel_exptime(self, pixel_scale): # ensure pixel vs plate scale
+    def calculate_pixel_exptime(self, pixel_scale):
         """Calculate the pixel traversal exposure time.
 
         The pixel traversal exposure time is the time for the orbital object to
@@ -199,10 +197,33 @@ class BaseOrbitalObject:
 
         return pixel_exptime.to(u.s, equivalencies=[(u.pix, None)])
 
+# Construction starts here (11/30/2025, 18:30).
+
+    def calculate_adu(self, magnitude, exptime, bandpass, instrument):
+        """Calculate the number of ADU from the camera.
+
+        Parameters
+        __________
+        magnitude : `float`
+            Stationary AB magnitude.
+        exptime : `astropy.units.Quantity`
+            Exposure time.
+        bandpass : `rubin_sim.phot_utils.Bandpass`
+            Telescope throughput curve.
+        observatory : `leosim.Observatory`
+            Observatory imaging the orbital object.
+
+        Returns
+        -------
+        adu : `float`
+            Number of ADU.
+        """
+        return None
+
 # Below is flagged for replacement and removal (11/30/2024, 17:45).
    
-    def get_flux(self, magnitude, bandpass, instrument):
-        """Calculate the number of ADU for a given observation.
+    def get_adu(self, magnitude, bandpass, instrument):
+        """Calculate the total number of ADU for a given observation.
 
         Parameters
         ----------
@@ -210,8 +231,8 @@ class BaseOrbitalObject:
             Stationary AB magnitude.
         bandpass : `rubin_sim.phot_utils.Bandpass`
             Telescope throughput curve.
-        instrument : `leosim.Instrument`
-            Instrument used for observation.
+        observatory : `leosim.Observatory`
+            Observatory imaging the orbital object.
 
         Returns
         -------

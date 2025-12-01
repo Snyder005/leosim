@@ -1,3 +1,3 @@
 from .orbital_object import *
-from .instrument import *
+from .observatory import *
 from .component import *
