@@ -26,6 +26,7 @@ import os
 from astropy.constants import G, M_earth, R_earth
 import astropy.units as u
 import galsim
+import scipy
 
 import rubin_sim.phot_utils as photUtils
 
@@ -283,7 +284,7 @@ class BaseOrbitalObject:
         angular_distance : `astropy.units.Quantity`, (nx,)
             Array of angular distances from the streak center.
         cross_section : `astropy.units.Quantity`, (nx,)
-            Array ofstreak cross section signal values per pixel.
+            Array of streak cross section signal values per pixel.
         """
         final = self.get_final_profile(psf, observatory, band=band, magnitude=magnitude)
         image = final.drawImage(nx=nx, ny=ny, scale=scale)
@@ -299,21 +300,31 @@ class BaseOrbitalObject:
 
         return angular_distance, cross_section
 
-"""In development (12/01/2025, 00:30). Pseudocode for glint profile creation.
+    # Need to test and debug before commit (12/02/2025, 02:30)
+    def get_glint_image(self, psf, observatory, band, magnitude, glint_time, nx, ny, scale):
 
-    def get_glint_profile:
+        # get final profile for an object illuminated for glint_time
+        final = self.get_final_profile(psf, observatory, band=band, magnitude=magnitude, exptime=glint_time)
+        
+        # Get image
+        image = final.drawImage(nx=nx, ny=ny, scale=scale)
+        
+        # Get number of pixels traveled
+        pixel_travel = int((glint_time*self.perpendicular_omega).to_value(u.arcsec)/scale)
+        print(pixel_travel)
+ 
+        # Make glint image array (same shape as the original final image array)
+        glint_array = np.zeros(image.array.shape)
+        
+        # Perform boxcar convolution
+        win = scipy.signal.windows.boxcar(pixel_travel)/pixel_travel
+        for i in range(image.array.shape[1]):
+            glint_array[:, i] = scipy.signal.convolve(image.array[:, i], win, mode='same')
 
-        final = get_final_profile(..., exptime=glint_time)
+        glint_array = glint_array*np.sum(image.array)/np.sum(glint_array)
 
-        ny > glint_time*perpendicular_omega/scale
-
-        image = final.getImage(..., ny=ny)
-
-        apply boxcar filter and return.
-
-Looks like a function that can take an orbital object and use its final profile
-method and perpendicular omega attribute to create the glint.
-"""
+        # Need to return original image anyways
+        return image.array, glint_array
 
 # For now omit phi angle in the child classes until rework
 class DiskOrbitalObject(BaseOrbitalObject):
