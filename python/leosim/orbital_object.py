@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("DiskOrbitalObject", "RectangularOrbitalObject", "ComponentOrbital")
+__all__ = ("DiskOrbitalObject", "RectangularOrbitalObject", "CompositeOrbitalObject")
 
 import numpy as np
 import os
@@ -28,36 +28,6 @@ import astropy.units as u
 import galsim
 
 import rubin_sim.phot_utils as photUtils
-
-def get_streak_cross_section(final, nx, ny, scale, gain=1.):
-    """Calculate the cross section of a streak created by the orbital 
-    object in an image.
-
-    Parameters
-    ----------
-    final : `galsim.GSObject`
-        Final convolution of an orbital object.
-    nx : `int`
-        The x-direction size of the image.
-    ny : `int`
-        The y-direction size of the image.
-    scale: `float`
-        Pixel scale for the image.
-    gain: `float`, optional
-        Gain of the observatory camera in electrons per ADU (1.0, by default).
-
-    Returns
-    -------
-    angular_distance : `numpy.ndarray`
-        Array of angular distance from the streak center.
-    cross_section_signal : `numpy.ndarray`
-        Array of the streak cross section signal values.
-    """
-    image = final.drawImage(nx=steps, ny=steps, scale=scale)
-    cross_section_signal = np.sum(image.array, axis=0)*gain
-    angular_distance = np.linspace(-int(nx*scale/2), int(nx*scale/2), nx)
-
-    return angular_distance, cross_section_signal
 
 class BaseOrbitalObject:
     """A base class that defines attributes and methods common to all orbital
@@ -130,10 +100,10 @@ class BaseOrbitalObject:
         """Distance to orbital object from telescope (`astropy.units.Quantity`, 
         read-only).
         """
-        if np.isclose(self.theta.value, 0):
+        if np.isclose(self.nadir_angle.value, 0):
             distance = self.height
         else:
-            distance = np.sin(self.zenith_angle - self.nadir_angle)*R_earth/np.sin(self.zenith_angle)
+            distance = np.sin(self.zenith_angle - self.nadir_angle)*R_earth/np.sin(self.nadir_angle)
         return distance.to(u.km)
 
     @property
@@ -169,7 +139,7 @@ class BaseOrbitalObject:
         """Velocity perpendicular to the line-of-sight vector 
         (`astropy.units.Quantity`, read-only).
         """
-        v = self.orbital_velocity*np.cos(self.theta)
+        v = self.orbital_velocity*np.cos(self.nadir_angle)
         return v.to(u.m/u.s, equivalencies=u.dimensionless_angles())
 
     @property
@@ -180,28 +150,28 @@ class BaseOrbitalObject:
         omega = self.perpendicular_velocity/self.distance
         return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
-    def get_defocus_profile(self, instrument):
-        """Create the defocus kernel profile for a given instrument.
+    def get_defocus_profile(self, observatory):
+        """Create the defocus kernel profile.
 
         Parameterss
         ----------
-        instrument : `leosim.Instrument`
-            Instrument used for observation.
+        observatory : `leosim.Observatory`
+            Observatory viewing the orbital object.
         
         Returns
         -------
         defocus : `galsim.GSObject`
             Defocus kernel profile.
         """
-        r_o = (instrument.outer_radius/self.distance).to_value(u.arcsec, 
-                                                               equivalencies=u.dimensionless_angles())
-        r_i = (instrument.inner_radius/self.distance).to_value(u.arcsec, 
-                                                               equivalencies=u.dimensionless_angles())
+        r_o = (observatory.outer_radius/self.distance).to_value(u.arcsec, 
+                                                                equivalencies=u.dimensionless_angles())
+        r_i = (observatory.inner_radius/self.distance).to_value(u.arcsec, 
+                                                                equivalencies=u.dimensionless_angles())
         defocus = galsim.TopHat(r_o) - galsim.TopHat(r_i, flux=(r_i/r_o)**2.)
 
         return defocus
 
-    def calculate_pixel_exptime(self, pixel_scale):
+    def calculate_pixel_exptime(self, pixel_scale): # take an observatory or any pixel scale?
         """Calculate the pixel traversal exposure time.
 
         The pixel traversal exposure time is the time for the orbital object to
@@ -223,7 +193,7 @@ class BaseOrbitalObject:
 
         return pixel_exptime.to(u.s, equivalencies=[(u.pix, None)])
 
-    def calculate_adu(self, observatory, band, magnitude, exptime):
+    def calculate_adu(self, observatory, band, magnitude, exptime=None):
         """Calculate the number of ADU from the camera.
 
         Parameters
@@ -234,14 +204,18 @@ class BaseOrbitalObject:
             Name of filter band.
         magnitude : `float`
             Stationary AB magnitude.
-        exptime : `astropy.units.Quantity`
-            Exposure time.
+        exptime : `astropy.units.Quantity`, optional
+            Exposure time. If None, the pixel traversal exposure time will be 
+            used.
 
         Returns
         -------
         adu : `float`
             Number of ADU.
         """
+        if exptime is None:
+            exptime = self.calculate_pixel_exptime(observatory.pixel_scale)
+
         photo_params = observatory.get_photo_params(exptime.to(u.s))
         bandpass = observatory.get_bandpass(band)
         m0_adu = self.sed.calc_adu(bandpass, phot_params=photo_params)
@@ -264,7 +238,8 @@ class BaseOrbitalObject:
         magnitude : `float`, optional
             Stationary AB magnitude (None, by default)
         exptime : `astropy.units.Quantity`, optional
-            Exposure time (None, by default)
+            Exposure time. If None, the pixel traversal exposure time will be
+            used.
 
         Returns
         -------
@@ -274,11 +249,46 @@ class BaseOrbitalObject:
         defocus = self.get_defocus_profile(observatory)
         final = galsim.Convolve([self.profile, defocus, psf])
 
-        if (band is not None) and (magnitude is not None) and (exptime is not None):
+        if (band is not None) and (magnitude is not None):
             adu = self.calculate_adu(observatory, band, magnitude, exptime)
             final = final.withFlux(adu)
 
         return final
+
+    def get_streak_cross_section(self, final, observatory, nx, ny, scale, apply_gains=True):
+        """Calculate the cross section of a streak created by the orbital 
+        object in an image.
+
+        Parameters
+        ----------
+        final : `galsim.GSObject`
+            Final convolution of an orbital object.
+        nx : `int`
+            The x-direction size of the image.
+        ny : `int`
+            The y-direction size of the image.
+        scale: `float`
+            Pixel scale for the image.
+
+        Returns
+        -------
+        angular_distance : `numpy.ndarray`
+            Array of angular distance from the streak center.
+        cross_section : `numpy.ndarray`
+            Array of the streak cross section signal values per pixel.
+        """
+        image = final.drawImage(nx=nx, ny=ny, scale=scale)
+        cross_section = np.sum(image.array, axis=0)*observatory.pixel_scale.to_value(u.arcsec/u.pix)/scale
+        angular_distance = np.linspace(-int(nx*scale/2), int(nx*scale/2), nx)
+
+        # Set array units
+        cross_section *= u.adu/u.pix
+        if apply_gains:
+            cross_section *= observatory.gain
+
+        angular_distance *= u.arcsec
+
+        return angular_distance, cross_section
 
 """In development (12/01/2025, 00:30). Pseudocode for glint profile creation.
 
@@ -296,6 +306,7 @@ Looks like a function that can take an orbital object and use its final profile
 method and perpendicular omega attribute to create the glint.
 """
 
+# For now omit phi angle in the child classes until rework
 class DiskOrbitalObject(BaseOrbitalObject):
     """A circular disk orbital object.
 
@@ -303,14 +314,14 @@ class DiskOrbitalObject(BaseOrbitalObject):
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
-    zangle : `astropy.units.Quantity`
+    zenith_angle : `astropy.units.Quantity`
         Observed angle from telescope zenith.
     radius : `astropy.units.Quantity`
         Radius of the orbital object.
     """
 
-    def __init__(self, height, zangle, radius): 
-        super().__init__(height, zangle)
+    def __init__(self, height, zenith_angle, radius): 
+        super().__init__(height, zenith_angle)
         self._radius = radius.to(u.m)
 
     @property
@@ -334,7 +345,7 @@ class RectangularOrbitalObject(BaseOrbitalObject):
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
-    zangle : `astropy.units.Quantity`
+    zenith_angle : `astropy.units.Quantity`
         Observed angle from telescope zenith.
     width : `astropy.units.Quantity`
         Width of the orbital object.
@@ -342,8 +353,8 @@ class RectangularOrbitalObject(BaseOrbitalObject):
         Length of the orbital object.
     """
 
-    def __init__(self, height, zangle, width, length):
-        super().__init__(height, zangle)
+    def __init__(self, height, zenith_angle, width, length):
+        super().__init__(height, zenith_angle)
         self._width = width.to(u.m)
         self._length = length.to(u.m)
 
@@ -375,7 +386,7 @@ class CompositeOrbitalObject(BaseOrbitalObject): # This needs work to perform pr
     ----------
     height : `astropy.units.Quantity`
         Orbital height.
-    zangle : `astropy.units.Quantity`
+    zenith_angle : `astropy.units.Quantity`
         Observed angle from telescope zenith.
     components : `list` [`leosim.Component`]
         A list of components.
@@ -386,8 +397,8 @@ class CompositeOrbitalObject(BaseOrbitalObject): # This needs work to perform pr
         Raised if ``components`` is of length 0.
     """
 
-    def __init__(self, height, zangle, components):
-        super().__init__(height, zangle)
+    def __init__(self, height, zenith_angle, components):
+        super().__init__(height, zenith_angle)
 
         if len(components) == 0: # Need a way to check this is a non-empty list or tuple (or similar).
             raise ValueError("components list must include at least one component.")

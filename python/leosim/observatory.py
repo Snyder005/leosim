@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("Instrument",)
+__all__ = ("Observatory",)
 
 import os
 import astropy.units as u
@@ -43,8 +43,8 @@ class Observatory:
     bands : `list` [`str`], optional
         List of names of the filter bands. (['u', 'g', 'r', 'i', 'z', 'y'], 
         by default).
-    gain : `float`, optional
-        Gain of the observatory camera in electrons per ADU (1.0, by default).
+    gain : `astropy.units.Quantity``, optional
+        Gain of the observatory camera (1.0, by default).
 
     Raises
     ------
@@ -54,7 +54,7 @@ class Observatory:
     """
 
     def __init__(self, outer_radius, inner_radius, pixel_scale, bands=["u", "g", "r", "i", "z", "y"],
-                 gain=1.0):
+                 gain=1.0*u.electron/u.adu):
 
         if outer_radius.to(u.m) <= inner_radius.to(u.m):
             raise ValueError("Outer radius must be greater than inner radius.")
@@ -62,8 +62,8 @@ class Observatory:
         self._inner_radius = inner_radius.to(u.m)        
         self._pixel_scale = pixel_scale.to(u.arcsec/u.pix)
         self._bandpasses = dict()
-        self.add_bandpasses(*bands)
-        self._gain = gain
+        self.add_bandpasses(bands)
+        self._gain = gain.to(u.electron/u.adu)
 
     @property
     def outer_radius(self):
@@ -120,19 +120,20 @@ class Observatory:
         photo_params : `rubin_sim.phot_utils.PhotometricParameters`
             Photometric parameters for the exposure.
         """
-        photo_params = photUtils.PhotometricParameters(exptime=exptime.to_value(u.s), nexp=1, gain=self.gain,
+        photo_params = photUtils.PhotometricParameters(exptime=exptime.to_value(u.s), nexp=1, 
+                                                       gain=self.gain.to_value(u.electron/u.adu),
                                                        effarea=self.effective_area.to_value(u.cm*u.cm),
                                                        platescale=self.pixel_scale.to_value(u.arcsec/u.pix))
 
         return photo_params
 
-    def add_bandpasses(self, *bands):
+    def add_bandpasses(self, bands):
         """Add bandpasses to the dictionary.
 
         Parameters
         ----------
-        *bands : `str`
-            Names of the filter bands.
+        bands : `list` [`str`]
+            List of names of the filter bands.
 
         Raises
         ------
@@ -140,6 +141,9 @@ class Observatory:
             Raised if a filter band name is a key for a bandpass already 
             present in the dictionary.
         """
+        if not isinstance(bands, list):
+            bands = [bands]
+
         for band in bands:
             if band in self.bandpasses:
                 raise ValueError(f"Band {band} is already present in the dictionary.")
