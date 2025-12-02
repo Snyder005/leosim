@@ -255,35 +255,44 @@ class BaseOrbitalObject:
 
         return final
 
-    def get_streak_cross_section(self, final, observatory, nx, ny, scale, apply_gains=True):
+    def get_streak_cross_section(self, psf, observatory, band, magnitude, nx, ny, scale, apply_gain=True):
         """Calculate the cross section of a streak created by the orbital 
         object in an image.
 
         Parameters
         ----------
-        final : `galsim.GSObject`
-            Final convolution of an orbital object.
+        psf : `galsim.GSObject`
+            A surface brightness profile representing an atmospheric PSF.
+        observatory : `leosim.Observatory`
+            Observatory viewing the orbital object.
+        band : `str`
+            Name of filter band.
+        magnitude : `float`
+            Stationary AB magnitude        
         nx : `int`
             The x-direction size of the image.
         ny : `int`
             The y-direction size of the image.
         scale: `float`
             Pixel scale for the image.
+        apply_gain: `bool`, optional
+            If `True`, apply gain (`True`, by default).
 
         Returns
         -------
-        angular_distance : `numpy.ndarray`
-            Array of angular distance from the streak center.
-        cross_section : `numpy.ndarray`
-            Array of the streak cross section signal values per pixel.
+        angular_distance : `astropy.units.Quantity`, (nx,)
+            Array of angular distances from the streak center.
+        cross_section : `astropy.units.Quantity`, (nx,)
+            Array ofstreak cross section signal values per pixel.
         """
+        final = self.get_final_profile(psf, observatory, band=band, magnitude=magnitude)
         image = final.drawImage(nx=nx, ny=ny, scale=scale)
         cross_section = np.sum(image.array, axis=0)*observatory.pixel_scale.to_value(u.arcsec/u.pix)/scale
         angular_distance = np.linspace(-int(nx*scale/2), int(nx*scale/2), nx)
 
         # Set array units
         cross_section *= u.adu/u.pix
-        if apply_gains:
+        if apply_gain:
             cross_section *= observatory.gain
 
         angular_distance *= u.arcsec
