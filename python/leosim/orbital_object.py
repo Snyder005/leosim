@@ -231,7 +231,7 @@ class BaseOrbitalObject:
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
         band : `str`
-            Name of bandpass.
+            Name of filter band.
         magnitude : `float`
             Stationary AB magnitude.
         exptime : `astropy.units.Quantity`
@@ -260,7 +260,7 @@ class BaseOrbitalObject:
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
         band : `str`, optional
-            Name of telescope bandpass (None, by default)
+            Name of filter band (None, by default)
         magnitude : `float`, optional
             Stationary AB magnitude (None, by default)
         exptime : `astropy.units.Quantity`, optional
@@ -279,6 +279,22 @@ class BaseOrbitalObject:
             final = final.withFlux(adu)
 
         return final
+
+"""In development (12/01/2025, 00:30). Pseudocode for glint profile creation.
+
+    def get_glint_profile:
+
+        final = get_final_profile(..., exptime=glint_time)
+
+        ny > glint_time*perpendicular_omega/scale
+
+        image = final.getImage(..., ny=ny)
+
+        apply boxcar filter and return.
+
+Looks like a function that can take an orbital object and use its final profile
+method and perpendicular omega attribute to create the glint.
+"""
 
 class DiskOrbitalObject(BaseOrbitalObject):
     """A circular disk orbital object.

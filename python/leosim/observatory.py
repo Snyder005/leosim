@@ -34,12 +34,15 @@ class Observatory:
 
     Parameters
     ----------
-    outer_radius : `(astropy.units.Quantity)`
-        Outer radius of the primary mirror.
-    inner_radius : `(astropy.units.Quantity)`
-        Inner radius of the primary mirror.
-    pixel_scale : `(astropy.units.Quantity)`
-        Pixel scale of the instrument camera.
+    outer_radius : `astropy.units.Quantity`
+        Outer radius of the telescope primary mirror.
+    inner_radius : `astropy.units.Quantity`
+        Inner radius of the telescope primary mirror.
+    pixel_scale : `astropy.units.Quantity`
+        Pixel scale of the observatory camera.
+    bands : `list` [`str`], optional
+        List of names of the filter bands. (['u', 'g', 'r', 'i', 'z', 'y'], 
+        by default).
     gain : `float`, optional
         Gain of the observatory camera in electrons per ADU (1.0, by default).
 
@@ -50,13 +53,16 @@ class Observatory:
         ``inner_radius``.
     """
 
-    def __init__(self, outer_radius, inner_radius, pixel_scale, gain=1.0):
+    def __init__(self, outer_radius, inner_radius, pixel_scale, bands=["u", "g", "r", "i", "z", "y"],
+                 gain=1.0):
 
         if outer_radius.to(u.m) <= inner_radius.to(u.m):
             raise ValueError("Outer radius must be greater than inner radius.")
         self._outer_radius = outer_radius.to(u.m)
         self._inner_radius = inner_radius.to(u.m)        
         self._pixel_scale = pixel_scale.to(u.arcsec/u.pix)
+        self._bandpasses = dict()
+        self.add_bandpasses(*bands)
         self._gain = gain
 
     @property
@@ -87,6 +93,13 @@ class Observatory:
         return self._gain
 
     @property
+    def bandpasses(self):
+        """Dictionary of telescope throughput curves. Keys are filter band 
+        names (`dict` [`str`, `rubin_sim.phot_utils.Bandpass`], read-only).
+        """
+        return self._bandpasses
+
+    @property
     def effective_area(self):
         """Effective collecting area of the telescope 
         (`astropy.units.Quantity`, read-only).
@@ -113,9 +126,30 @@ class Observatory:
 
         return photo_params
 
-    @staticmethod
+    def add_bandpasses(self, *bands):
+        """Add bandpasses to the dictionary.
+
+        Parameters
+        ----------
+        *bands : `str`
+            Names of the filter bands.
+
+        Raises
+        ------
+        ValueError
+            Raised if a filter band name is a key for a bandpass already 
+            present in the dictionary.
+        """
+        for band in bands:
+            if band in self.bandpasses:
+                raise ValueError(f"Band {band} is already present in the dictionary.")
+            filename = os.path.join(get_data_dir(), "throughputs", "baseline", f"total_{band}.dat")
+            bandpass = photUtils.Bandpass()
+            bandpass.read_throughput(filename)
+            self._bandpasses[band] = bandpass
+
     def get_bandpass(self, band):
-        """Get bandpass corresponding to the filter band.
+        """Get a bandpass from the dictionary.
         
         Parameters
         ----------
@@ -126,9 +160,15 @@ class Observatory:
         -------
         bandpass : `rubin_sim.phot_utils.Bandpass`
             Telescope throughput curve.
+
+        Raises
+        ------
+        ValueError
+            Raised if a filter band name is not a key for a bandpass in the
+            dictionary. 
         """
-        filename = os.path.join(get_data_dir(),'throughputs/baseline/total_{0}.dat'.format(band))
-        bandpass = photUtils.Bandpass()
-        bandpass.read_throughput(filename)
+        if band not in self.bandpasses:
+            raise ValueError(f"Band {band} is not present in the dictionary")
+        bandpass = self.bandpasses[band]
 
         return bandpass
