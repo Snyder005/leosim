@@ -274,8 +274,8 @@ class BaseOrbitalObject:
             The x-direction size of the image.
         ny : `int`
             The y-direction size of the image.
-        scale: `float`
-            Pixel scale for the image.
+        scale : `float`
+            Pixel scale of the image.
         apply_gain: `bool`, optional
             If `True`, apply gain (`True`, by default).
 
@@ -300,31 +300,48 @@ class BaseOrbitalObject:
 
         return angular_distance, cross_section
 
-    # Need to test and debug before commit (12/02/2025, 02:30)
     def get_glint_image(self, psf, observatory, band, magnitude, glint_time, nx, ny, scale):
+        """Create an image of a glint.
 
-        # get final profile for an object illuminated for glint_time
-        final = self.get_final_profile(psf, observatory, band=band, magnitude=magnitude, exptime=glint_time)
-        
-        # Get image
+        Parameters
+        ----------
+        psf : `galsim.GSObject`
+            A surface brightness profile representing an atmospheric PSF.
+        observatory : `leosim.Observatory`
+            Observatory viewing the orbital object.
+        band : `str`
+            Name of filter band.
+        magnitude : `float`
+            Stationary AB magnitude
+        glint_time : `astropy.units.Quantity`
+            Duration of glint.
+        nx : `int`
+            The x-direction size of the image.
+        ny : `int`
+            The y-direction size of the image.
+        scale : `float`
+            Pixel scale of the image.
+
+        Returns
+        -------
+        glint_image : `galsim.Image`
+            Image of a glint.
+        """
+
+        final = self.get_final_profile(psf, observatory, band=band, magnitude=magnitude, exptime=glint_time)        
         image = final.drawImage(nx=nx, ny=ny, scale=scale)
         
-        # Get number of pixels traveled
         pixel_travel = int((glint_time*self.perpendicular_omega).to_value(u.arcsec)/scale)
-        print(pixel_travel)
- 
-        # Make glint image array (same shape as the original final image array)
         glint_array = np.zeros(image.array.shape)
         
-        # Perform boxcar convolution
         win = scipy.signal.windows.boxcar(pixel_travel)/pixel_travel
         for i in range(image.array.shape[1]):
             glint_array[:, i] = scipy.signal.convolve(image.array[:, i], win, mode='same')
-
         glint_array = glint_array*np.sum(image.array)/np.sum(glint_array)
 
-        # Need to return original image anyways
-        return image.array, glint_array
+        glint_image = galsim.Image(glint_array, scale=image.scale)
+
+        return glint_image
 
 # For now omit phi angle in the child classes until rework
 class DiskOrbitalObject(BaseOrbitalObject):
