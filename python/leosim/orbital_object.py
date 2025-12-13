@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-__all__ = ("DiskOrbitalObject", "RectangularOrbitalObject", "CompositeOrbitalObject")
+__all__ = ("DiskOrbitalObject", "RectangularOrbitalObject")
 
 import numpy as np
 import os
@@ -41,7 +41,7 @@ class BaseOrbitalObject:
     zenith_angle : `astropy.units.Quantity`
         Observed angle from telescope zenith.
     phi : `astropy.units.Quantity`, optional
-        Rotational angle (90 degrees, by default).
+        Angular orientation (90 degrees, by default).
 
     Raises
     ------
@@ -49,10 +49,15 @@ class BaseOrbitalObject:
         Raised if parameter ``zenith_angle`` is less than 0 deg.
     """
 
-    def __init__(self, height, zenith_angle, phi=90*u.deg):
+    nadir_pointing = None
+    """Nadir-point object if `True` (`bool`).
+    """
+
+    def __init__(self, height, zenith_angle, phi=90*u.deg, nadir_pointing=True):
         self.height = height
         self.zenith_angle = zenith_angle
-        self.phi = phi # May change in future updates
+        self._phi = phi
+        self.nadir_pointing = nadir_pointing
         self._sed = photUtils.Sed()
         self._sed.set_flat_sed()
 
@@ -81,7 +86,8 @@ class BaseOrbitalObject:
 
     @property
     def phi(self):
-        """Rotational angle (`astropy.units.Quantity`)."""
+        """Anglular orientation (`astropy.units.Quantity`).
+        """
         return self._phi
 
     @phi.setter
@@ -136,7 +142,7 @@ class BaseOrbitalObject:
         return omega.to(u.rad/u.s, equivalencies=u.dimensionless_angles())
 
     @property
-    def perpendicular_velocity(self): # Expand to include all directions of orbital object motion
+    def perpendicular_velocity(self):
         """Velocity perpendicular to the line-of-sight vector 
         (`astropy.units.Quantity`, read-only).
         """
@@ -235,9 +241,9 @@ class BaseOrbitalObject:
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
         band : `str`, optional
-            Name of filter band (None, by default)
+            Name of filter band (None, by default).
         magnitude : `float`, optional
-            Stationary AB magnitude (None, by default)
+            Stationary AB magnitude (None, by default).
         exptime : `astropy.units.Quantity`, optional
             Exposure time. If None, the pixel traversal exposure time will be
             used.
@@ -256,7 +262,8 @@ class BaseOrbitalObject:
 
         return final
 
-    def get_streak_cross_section(self, psf, observatory, band, magnitude, nx, ny, scale, apply_gain=True):
+    def get_streak_cross_section(self, psf, observatory, nx, ny, scale, band=None, magnitude=None, 
+                                 apply_gain=True):
         """Calculate the cross section of a streak created by the orbital 
         object in an image.
 
@@ -266,16 +273,16 @@ class BaseOrbitalObject:
             A surface brightness profile representing an atmospheric PSF.
         observatory : `leosim.Observatory`
             Observatory viewing the orbital object.
-        band : `str`
-            Name of filter band.
-        magnitude : `float`
-            Stationary AB magnitude        
         nx : `int`
             The x-direction size of the image.
         ny : `int`
             The y-direction size of the image.
         scale : `float`
             Pixel scale of the image.
+        band : `str`, optional
+            Name of filter band. (None, by default).
+        magnitude : `float`, optional
+            Stationary AB magnitude (None, by default).      
         apply_gain: `bool`, optional
             If `True`, apply gain (`True`, by default).
 
@@ -291,11 +298,9 @@ class BaseOrbitalObject:
         cross_section = np.sum(image.array, axis=0)*observatory.pixel_scale.to_value(u.arcsec/u.pix)/scale
         angular_distance = np.linspace(-int(nx*scale/2), int(nx*scale/2), nx)
 
-        # Set array units
         cross_section *= u.adu/u.pix
         if apply_gain:
             cross_section *= observatory.gain
-
         angular_distance *= u.arcsec
 
         return angular_distance, cross_section
@@ -343,7 +348,26 @@ class BaseOrbitalObject:
 
         return glint_image
 
-# For now omit phi angle in the child classes until rework
+    def _projection(self, profile):
+        """Apply angle-of-view projection effects.
+
+        Parameters
+        ----------
+        profile: `galsim.GSObject`
+            A surface brightness profile.
+
+        Returns
+        -------
+        projected_profile: `galsim.GSObject`
+            The projected surface brightness profile.
+        """
+
+        mu = np.cos(self.nadir_angle)
+        angle = galsim.Angle(self.phi.to_value(u.deg), galsim.degrees)
+        projected_profile = profile.rotate(angle).transform(mu, 0., 0., 1).rotate(-angle)/mu
+
+        return projected_profile
+
 class DiskOrbitalObject(BaseOrbitalObject):
     """A circular disk orbital object.
 
@@ -355,10 +379,21 @@ class DiskOrbitalObject(BaseOrbitalObject):
         Observed angle from telescope zenith.
     radius : `astropy.units.Quantity`
         Radius of the orbital object.
+    phi : `astropy.units.Quantity`, optional
+        Angular orientation (90 degrees, by default).
+
+    Raises
+    ------
+    ValueError
+        Raised if parameter ``zenith_angle`` is less than 0 deg.
     """
 
-    def __init__(self, height, zenith_angle, radius): 
-        super().__init__(height, zenith_angle)
+    nadir_pointing = None
+    """Nadir-point object if `True` (`bool`).
+    """
+
+    def __init__(self, height, zenith_angle, radius, phi=90*u.deg, nadir_pointing=True): 
+        super().__init__(height, zenith_angle, phi=phi, nadir_pointing=nadir_pointing)
         self._radius = radius.to(u.m)
 
     @property
@@ -373,7 +408,12 @@ class DiskOrbitalObject(BaseOrbitalObject):
         (`galsim.TopHat`, read-only).
         """
         r = (self.radius/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
-        return galsim.TopHat(r)
+        profile = galsim.TopHat(r)
+
+        if self.nadir_pointing:
+            profile = self._projection(profile)
+
+        return profile
 
 class RectangularOrbitalObject(BaseOrbitalObject):
     """A rectangular orbital object.
@@ -388,10 +428,21 @@ class RectangularOrbitalObject(BaseOrbitalObject):
         Width of the orbital object.
     length : `astropy.units.Quantity`
         Length of the orbital object.
+    phi : `astropy.units.Quantity`, optional
+        Angular orientation (90 degrees, by default).
+
+    Raises
+    ------
+    ValueError
+        Raised if parameter ``zenith_angle`` is less than 0 deg.
     """
 
-    def __init__(self, height, zenith_angle, width, length):
-        super().__init__(height, zenith_angle)
+    nadir_pointing = None
+    """Nadir-point object if `True` (`bool`).
+    """
+
+    def __init__(self, height, zenith_angle, width, length, phi=90*u.deg, nadir_pointing=True):
+        super().__init__(height, zenith_angle, phi=phi, nadir_pointing=nadir_pointing)
         self._width = width.to(u.m)
         self._length = length.to(u.m)
 
@@ -414,9 +465,15 @@ class RectangularOrbitalObject(BaseOrbitalObject):
         """
         w = (self.width/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
         l = (self.length/self.distance).to_value(u.arcsec, equivalencies=u.dimensionless_angles())
-        return galsim.Box(w, l)
+        profile = galsim.Box(w, l)
 
-class CompositeOrbitalObject(BaseOrbitalObject): # This needs work to perform proper component list checks.
+        if self.nadir_pointing:
+            profile = self._projection(profile)
+
+        return profile
+
+# Under construction
+class CompositeOrbitalObject(BaseOrbitalObject):
     """A composite orbital object made up of smaller components.
 
     Parameters
